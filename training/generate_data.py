@@ -1,23 +1,4 @@
-"""Generate self-play training data for the NN heuristic.
 
-Since minimax with a fixed heuristic is fully deterministic, we introduce
-randomness in three ways to ensure diverse games:
-
-  1. Random opening:  The first RANDOM_OPENING_MOVES moves are chosen
-                      uniformly at random from legal moves.
-  2. Epsilon-greedy:  With probability EPSILON, a random legal move is
-                      chosen instead of the minimax-best move.
-  3. Depth jitter:    Search depth is randomly varied per move within
-                      [SEARCH_DEPTH - 1, SEARCH_DEPTH + 1].
-
-Games are parallelized across CPU cores using multiprocessing.
-
-Each recorded position stores:
-  - The heuristic score at that position
-  - The final game outcome (+1 win, -1 loss, 0 draw) from current player's POV
-
-Data is augmented with D4 symmetry (4 rotations x 2 reflections = 8x).
-"""
 
 import sys
 import os
@@ -31,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from reversi import reversi
 from utils import get_legal_moves, apply_move
 from heuristic_functions import heuristic_nic
-from minimax_alpha_beta_h_nic import minimax, TimeUp
+from minimax_alpha_beta_h_nic_nn import minimax, TimeUp
 from nn_heuristic import NNHeuristic, extract_features
 
 # ── NN Heuristic Setup ───────────────────────────────────────────────────────

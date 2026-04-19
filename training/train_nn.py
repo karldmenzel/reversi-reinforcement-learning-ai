@@ -1,17 +1,3 @@
-"""Train the NN heuristic using PyTorch.
-
-Architecture matches the numpy inference in src/nn_heuristic.py:
-    Input(139) -> Dense(1024, ReLU) -> Dense(512, ReLU) -> Dense(256, ReLU) -> Dense(1, tanh)
-    ~800K parameters
-
-Dual loss:
-    - 0.7 * MSE(predicted, game_outcome)       — learn what wins
-    - 0.3 * MSE(predicted, heuristic_score)     — bootstrap from existing knowledge
-    The heuristic weight decays linearly to 0 over training.
-
-Exports weights to weights/heuristic_v1.npz for numpy inference.
-"""
-
 import os
 import sys
 import numpy as np
