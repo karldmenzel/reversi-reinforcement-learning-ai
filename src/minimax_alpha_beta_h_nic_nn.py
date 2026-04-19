@@ -154,7 +154,7 @@ def get_best_move(board, game, player, heuristic):
     return best_move
 
 
-def choose_drfgtttcttgtmove(turn, board, game) -> list:
+def choose_move(turn, board, game) -> list:
     # A copy of the board allows the algo to mutate the board freely without effecting the actual game board.
     search_game = reversi()
     search_game.board = board.copy()
