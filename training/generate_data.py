@@ -17,22 +17,25 @@ from nn_heuristic import NNHeuristic, extract_features
 
 # ── NN Heuristic Setup ───────────────────────────────────────────────────────
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '../src', 'weights', 'heuristic_v1.npz')
-if os.path.exists(WEIGHTS_PATH):
-    _nn_heuristic = NNHeuristic(WEIGHTS_PATH)
-    HEURISTIC_FN = _nn_heuristic
-    print(f"Using NN heuristic from {WEIGHTS_PATH}")
-else:
-    HEURISTIC_FN = heuristic_nic
-    print(f"NN weights not found at {WEIGHTS_PATH}, falling back to heuristic_nic")
+HEURISTIC_FN = None  # initialized per-worker via _init_worker
+
+
+def _init_worker():
+    """Initialize the heuristic in each worker process (avoids pickling issues)."""
+    global HEURISTIC_FN
+    if os.path.exists(WEIGHTS_PATH):
+        HEURISTIC_FN = NNHeuristic(WEIGHTS_PATH)
+    else:
+        HEURISTIC_FN = heuristic_nic
 
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 NUM_GAMES = 10000
 SEARCH_DEPTH = 3              # base depth per move during data generation
 DEPTH_JITTER = 1              # depth varies in [SEARCH_DEPTH - jitter, + jitter]
-TIME_PER_MOVE = 2.0           # seconds per move
+TIME_PER_MOVE = 1.0           # seconds per move
 RANDOM_OPENING_MOVES = 6      # first N moves of each game are fully random
-EPSILON = 0.15                # probability of picking a random move mid-game
+EPSILON = 0.25                # probability of picking a random move mid-game
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'data')
 SAVE_EVERY = 500              # save checkpoint every N games
 NUM_WORKERS = max(1, cpu_count() - 1)  # leave 1 core free
@@ -183,7 +186,9 @@ def main():
 
     start_time = time.time()
 
+    heuristic_name = "NN heuristic" if os.path.exists(WEIGHTS_PATH) else "heuristic_nic"
     print(f"Generating {NUM_GAMES} self-play games across {NUM_WORKERS} workers")
+    print(f"  Heuristic: {heuristic_name}")
     print(f"  Search depth: {SEARCH_DEPTH} +/- {DEPTH_JITTER}")
     print(f"  Random opening moves: {RANDOM_OPENING_MOVES}")
     print(f"  Epsilon (random move prob): {EPSILON}")
@@ -195,7 +200,7 @@ def main():
 
     work_items = [(i, int(game_seeds[i])) for i in range(NUM_GAMES)]
 
-    with Pool(processes=NUM_WORKERS) as pool:
+    with Pool(processes=NUM_WORKERS, initializer=_init_worker) as pool:
         # imap_unordered gives results as they finish, not in submission order
         for features, outcomes, hscores in pool.imap_unordered(
                 _process_game_result, work_items, chunksize=CHUNK_SIZE):
