@@ -9,6 +9,7 @@ import sys
 import os
 import shutil
 import time
+from multiprocessing import Pool, cpu_count
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
@@ -16,7 +17,7 @@ from reversi import reversi
 from utils import get_legal_moves
 from nn_heuristic import NNHeuristic
 from heuristic_functions import heuristic_nic
-from minimax_alpha_beta_h_nic import get_best_move
+from minimax_alpha_beta_h_nic_nn import get_best_move
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 MIN_CYCLES = 5
@@ -24,6 +25,7 @@ EVAL_GAMES = 25          # games per color (total = 2 * EVAL_GAMES)
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'weights')
 BEST_WEIGHTS = os.path.join(WEIGHTS_DIR, 'heuristic_v1.npz')
 CANDIDATE_WEIGHTS = os.path.join(WEIGHTS_DIR, 'heuristic_candidate.npz')
+NUM_WORKERS = max(1, cpu_count() - 1)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -73,38 +75,62 @@ def play_game(player1_fn, player2_fn):
     return 0
 
 
-def evaluate(candidate_fn, baseline_fn, num_games):
-    """Run a head-to-head tournament. Returns (candidate_wins, baseline_wins, draws)."""
+def _play_eval_game(args):
+    """Worker: play one evaluation game. Returns (candidate_is_white, result)."""
+    game_idx, candidate_is_white, candidate_weights, baseline_weights = args
+    # Load heuristics inside worker (closures aren't picklable)
+    candidate_fn = NNHeuristic(candidate_weights)
+    baseline_fn = NNHeuristic(baseline_weights) if baseline_weights else heuristic_nic
     candidate_move = make_choose_move(candidate_fn)
     baseline_move = make_choose_move(baseline_fn)
 
+    if candidate_is_white:
+        result = play_game(candidate_move, baseline_move)
+    else:
+        result = play_game(baseline_move, candidate_move)
+    return candidate_is_white, result
+
+
+def evaluate(candidate_weights, baseline_weights, num_games):
+    """Run a parallel head-to-head tournament. Returns (candidate_wins, baseline_wins, draws).
+
+    Args:
+        candidate_weights: path to candidate .npz weights
+        baseline_weights: path to baseline .npz weights, or None for classic heuristic
+        num_games: games per color assignment
+    """
     c_wins = 0
     b_wins = 0
     draws = 0
+    total_games = num_games * 2
 
-    # Candidate as White
-    for i in range(num_games):
-        result = play_game(candidate_move, baseline_move)
-        if result == 1:
-            c_wins += 1
-        elif result == -1:
-            b_wins += 1
-        else:
-            draws += 1
-        print(f"  [CandW] Game {i+1}/{num_games}: "
-              f"Candidate {c_wins} - Baseline {b_wins} - Draws {draws}")
+    work_items = [(i, True, candidate_weights, baseline_weights) for i in range(num_games)] + \
+                 [(i, False, candidate_weights, baseline_weights) for i in range(num_games)]
 
-    # Candidate as Black
-    for i in range(num_games):
-        result = play_game(baseline_move, candidate_move)
-        if result == -1:
-            c_wins += 1
-        elif result == 1:
-            b_wins += 1
-        else:
-            draws += 1
-        print(f"  [CandB] Game {i+1}/{num_games}: "
-              f"Candidate {c_wins} - Baseline {b_wins} - Draws {draws}")
+    with Pool(processes=NUM_WORKERS) as pool:
+        for completed, (candidate_is_white, result) in enumerate(
+            pool.imap_unordered(_play_eval_game, work_items), 1
+        ):
+            if candidate_is_white:
+                if result == 1:
+                    c_wins += 1
+                elif result == -1:
+                    b_wins += 1
+                else:
+                    draws += 1
+                outcome = 'Cand wins' if result == 1 else 'Base wins' if result == -1 else 'Draw'
+            else:
+                if result == -1:
+                    c_wins += 1
+                elif result == 1:
+                    b_wins += 1
+                else:
+                    draws += 1
+                outcome = 'Cand wins' if result == -1 else 'Base wins' if result == 1 else 'Draw'
+
+            color = "CandW" if candidate_is_white else "CandB"
+            print(f"  [{color}] Game {completed}/{total_games}: "
+                  f"{outcome} | Candidate {c_wins} - Baseline {b_wins} - Draws {draws}")
 
     return c_wins, b_wins, draws
 
@@ -136,6 +162,7 @@ def main():
     print("ITERATIVE TRAINING PIPELINE")
     print(f"  Cycles: {MIN_CYCLES}")
     print(f"  Eval games per color: {EVAL_GAMES} (total: {EVAL_GAMES * 2})")
+    print(f"  Workers: {NUM_WORKERS}")
     print("=" * 60)
 
     for cycle in range(1, MIN_CYCLES + 1):
@@ -155,19 +182,13 @@ def main():
         # ── Step 3: Evaluate ──────────────────────────────────────────
         print(f"\n[Cycle {cycle}] Step 3/3: Evaluating candidate vs baseline...")
 
-        candidate = NNHeuristic(CANDIDATE_WEIGHTS)
-
-        if os.path.exists(BEST_WEIGHTS):
-            baseline = NNHeuristic(BEST_WEIGHTS)
-            baseline_name = "previous best NN"
-        else:
-            baseline = heuristic_nic
-            baseline_name = "classic heuristic"
+        baseline_weights = BEST_WEIGHTS if os.path.exists(BEST_WEIGHTS) else None
+        baseline_name = "previous best NN" if baseline_weights else "classic heuristic"
 
         print(f"  Candidate: {CANDIDATE_WEIGHTS}")
         print(f"  Baseline:  {baseline_name}")
 
-        c_wins, b_wins, draws = evaluate(candidate, baseline, EVAL_GAMES)
+        c_wins, b_wins, draws = evaluate(CANDIDATE_WEIGHTS, baseline_weights, EVAL_GAMES)
         total = c_wins + b_wins + draws
 
         print(f"\n  Results: Candidate {c_wins}/{total} "
