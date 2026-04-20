@@ -80,7 +80,7 @@ def _play_eval_game(args):
     game_idx, candidate_is_white, candidate_weights, baseline_weights = args
     # Load heuristics inside worker (closures aren't picklable)
     candidate_fn = NNHeuristic(candidate_weights)
-    baseline_fn = NNHeuristic(baseline_weights) if baseline_weights else heuristic_nic
+    baseline_fn = NNHeuristic(baseline_weights) if baseline_weights != '__CH__' else heuristic_nic
     candidate_move = make_choose_move(candidate_fn)
     baseline_move = make_choose_move(baseline_fn)
 
@@ -182,26 +182,53 @@ def main():
         # ── Step 3: Evaluate ──────────────────────────────────────────
         print(f"\n[Cycle {cycle}] Step 3/3: Evaluating candidate vs baseline...")
 
-        baseline_weights = BEST_WEIGHTS if os.path.exists(BEST_WEIGHTS) else None
-        baseline_name = "previous best NN" if baseline_weights else "classic heuristic"
+        baseline_weights = BEST_WEIGHTS if os.path.exists(BEST_WEIGHTS) else '__CH__'
+        baseline_name = "previous best NN" if baseline_weights != '__CH__' else "classic heuristic"
+        baseline_is_ch = (baseline_weights == '__CH__')
 
         print(f"  Candidate: {CANDIDATE_WEIGHTS}")
         print(f"  Baseline:  {baseline_name}")
 
+        # ── Gate 1: candidate vs baseline ────────────────────────────
+        print(f"\n  [Gate 1] Candidate vs {baseline_name}")
         c_wins, b_wins, draws = evaluate(CANDIDATE_WEIGHTS, baseline_weights, EVAL_GAMES)
         total = c_wins + b_wins + draws
 
-        print(f"\n  Results: Candidate {c_wins}/{total} "
+        print(f"\n  Gate 1 Results: Candidate {c_wins}/{total} "
               f"({100*c_wins/total:.1f}%) | "
               f"Baseline {b_wins}/{total} ({100*b_wins/total:.1f}%) | "
               f"Draws {draws}")
 
-        # Promote candidate if it wins more games
-        if c_wins >= b_wins:
+        passed_gate1 = c_wins >= b_wins
+
+        # ── Gate 2: candidate vs CH (skip if baseline is already CH) ─
+        if baseline_is_ch:
+            passed_gate2 = True
+            print(f"\n  [Gate 2] Skipped (baseline is already CH)")
+        else:
+            print(f"\n  [Gate 2] Candidate vs classic heuristic (CH)")
+            ch_c_wins, ch_b_wins, ch_draws = evaluate(
+                CANDIDATE_WEIGHTS, '__CH__', EVAL_GAMES)
+            ch_total = ch_c_wins + ch_b_wins + ch_draws
+
+            print(f"\n  Gate 2 Results: Candidate {ch_c_wins}/{ch_total} "
+                  f"({100*ch_c_wins/ch_total:.1f}%) | "
+                  f"CH {ch_b_wins}/{ch_total} ({100*ch_b_wins/ch_total:.1f}%) | "
+                  f"Draws {ch_draws}")
+            passed_gate2 = ch_c_wins >= ch_b_wins
+
+        # Promote candidate only if it passes both gates
+        promoted = passed_gate1 and passed_gate2
+        if promoted:
             shutil.copy2(CANDIDATE_WEIGHTS, BEST_WEIGHTS)
             print(f"  >> Candidate PROMOTED to best weights")
         else:
-            print(f"  >> Candidate rejected, keeping previous best")
+            reasons = []
+            if not passed_gate1:
+                reasons.append("lost to baseline")
+            if not passed_gate2:
+                reasons.append("lost to CH")
+            print(f"  >> Candidate rejected ({', '.join(reasons)})")
 
         # Clean up candidate file
         if os.path.exists(CANDIDATE_WEIGHTS):

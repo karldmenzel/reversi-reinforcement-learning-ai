@@ -34,3 +34,16 @@ See src/example_player.py for details.
 5. Click inside the game after it has ended to close the window.
 
 Note: You may experience crashes/infinite loops if you try to close the screen before the game has ended.
+
+## Training the NN Heuristic
+
+The AI's neural network heuristic is trained through an iterative pipeline that uses mixed self-play (NN vs NN, CH vs CH, and NN vs CH) with a dual evaluation gate to prevent mode collapse.
+
+```bash
+python training/run_pipeline.py
+```
+
+See the training documentation for details:
+- [Pipeline overview](training/PIPELINE_README.md)
+- [Step-by-step training guide](training/TRAINING_README.md)
+- [Data generation details](training/DATA_GENERATION_README.md)

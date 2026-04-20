@@ -17,25 +17,36 @@ from nn_heuristic import NNHeuristic, extract_features
 
 # ── NN Heuristic Setup ───────────────────────────────────────────────────────
 WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '../src', 'weights', 'heuristic_v1.npz')
-HEURISTIC_FN = None  # initialized per-worker via _init_worker
+NN_HEURISTIC_FN = None   # initialized per-worker via _init_worker
+CH_HEURISTIC_FN = None   # always heuristic_nic
+
+# ── Game mode constants & ratios ─────────────────────────────────────────────
+MODE_NN_SELF = 'nn_self'    # NN vs NN
+MODE_CH_SELF = 'ch_self'    # CH vs CH
+MODE_CROSS   = 'cross'      # NN vs CH (alternating colors)
+
+NN_RATIO   = 0.5   # fraction of games: NN self-play
+CH_RATIO   = 0.2   # fraction of games: CH self-play
+CROSS_RATIO = 0.3  # fraction of games: cross-play
 
 
 def _init_worker():
-    """Initialize the heuristic in each worker process (avoids pickling issues)."""
-    global HEURISTIC_FN
+    """Initialize both heuristics in each worker process."""
+    global NN_HEURISTIC_FN, CH_HEURISTIC_FN
+    CH_HEURISTIC_FN = heuristic_nic
     if os.path.exists(WEIGHTS_PATH):
-        HEURISTIC_FN = NNHeuristic(WEIGHTS_PATH)
+        NN_HEURISTIC_FN = NNHeuristic(WEIGHTS_PATH)
     else:
-        HEURISTIC_FN = heuristic_nic
+        NN_HEURISTIC_FN = None  # no NN available yet
 
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 NUM_GAMES = 10000
 SEARCH_DEPTH = 3              # base depth per move during data generation
 DEPTH_JITTER = 1              # depth varies in [SEARCH_DEPTH - jitter, + jitter]
-TIME_PER_MOVE = 1.0           # seconds per move
+TIME_PER_MOVE = 1.5           # seconds per move
 RANDOM_OPENING_MOVES = 6      # first N moves of each game are fully random
-EPSILON = 0.25                # probability of picking a random move mid-game
+EPSILON = 0.15               # probability of picking a random move mid-game
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'data')
 SAVE_EVERY = 500              # save checkpoint every N games
 NUM_WORKERS = max(1, cpu_count() - 1)  # leave 1 core free
@@ -43,8 +54,15 @@ SEED = None                   # set to int for reproducibility, None for random
 # ───────────────────────────────────────────────────────────────────────────────
 
 
-def play_game(depth, heuristic_in, rng):
-    """Play a single self-play game with randomized moves for diversity.
+def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
+    """Play a game where each color can use a different heuristic.
+
+    Args:
+        depth: base search depth
+        white_heuristic: heuristic function for white player
+        black_heuristic: heuristic function for black player
+        hscore_heuristic: heuristic used for recording h_score labels
+        rng: numpy random generator
 
     Returns:
         positions: list of (board_copy, current_player, heuristic_score)
@@ -72,8 +90,11 @@ def play_game(depth, heuristic_in, rng):
 
         consecutive_passes = 0
 
-        # Record position and heuristic score from current player's perspective
-        h_score = heuristic_in(board, turn)
+        # Pick the heuristic for the current player
+        current_heuristic = white_heuristic if turn == 1 else black_heuristic
+
+        # Record position; use hscore_heuristic for the label
+        h_score = hscore_heuristic(board, turn)
         positions.append((board.copy(), turn, h_score))
 
         # Decide whether to use a random move or minimax
@@ -96,7 +117,7 @@ def play_game(depth, heuristic_in, rng):
                 for d in range(1, jittered_depth + 1):
                     _, move = minimax(board, search_game, d,
                                       float('-inf'), float('inf'),
-                                      True, turn, deadline, heuristic_in)
+                                      True, turn, deadline, current_heuristic)
                     best_move = move
             except TimeUp:
                 pass
@@ -141,10 +162,28 @@ def _process_game_result(args):
     Each worker gets its own RNG seeded uniquely to avoid duplicate games.
     Returns (features_list, outcomes_list, hscores_list).
     """
-    game_idx, worker_seed = args
+    game_idx, worker_seed, game_mode = args
     rng = np.random.default_rng(worker_seed)
 
-    positions, outcome = play_game(SEARCH_DEPTH, HEURISTIC_FN, rng)
+    # Determine heuristics for each color based on game mode
+    nn_fn = NN_HEURISTIC_FN
+    ch_fn = CH_HEURISTIC_FN
+
+    if game_mode == MODE_NN_SELF and nn_fn is not None:
+        white_h, black_h, hscore_h = nn_fn, nn_fn, nn_fn
+    elif game_mode == MODE_CROSS and nn_fn is not None:
+        # Alternate who plays white: even games NN=white, odd games NN=black
+        if game_idx % 2 == 0:
+            white_h, black_h = nn_fn, ch_fn
+        else:
+            white_h, black_h = ch_fn, nn_fn
+        # Always use CH for h_score labels to avoid circular bias
+        hscore_h = ch_fn
+    else:
+        # CH self-play (or fallback when no NN exists)
+        white_h, black_h, hscore_h = ch_fn, ch_fn, ch_fn
+
+    positions, outcome = play_game(SEARCH_DEPTH, white_h, black_h, hscore_h, rng)
 
     features = []
     outcomes = []
@@ -173,6 +212,23 @@ def _save(features, outcomes, hscores, path):
     print(f"  Saved checkpoint: {path} ({len(features)} samples)")
 
 
+def _assign_game_modes(num_games, nn_available):
+    """Pre-assign a game mode to each game index based on ratio config."""
+    if not nn_available:
+        # No NN weights yet — all games are CH self-play
+        return [MODE_CH_SELF] * num_games
+
+    n_nn = int(num_games * NN_RATIO)
+    n_ch = int(num_games * CH_RATIO)
+    n_cross = num_games - n_nn - n_ch  # remainder goes to cross-play
+    modes = ([MODE_NN_SELF] * n_nn +
+             [MODE_CH_SELF] * n_ch +
+             [MODE_CROSS] * n_cross)
+    # Shuffle so different modes are interleaved across workers
+    np.random.default_rng(42).shuffle(modes)
+    return modes
+
+
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -180,15 +236,23 @@ def main():
     master_rng = np.random.default_rng(SEED)
     game_seeds = master_rng.integers(0, 2**63, size=NUM_GAMES)
 
+    nn_available = os.path.exists(WEIGHTS_PATH)
+    game_modes = _assign_game_modes(NUM_GAMES, nn_available)
+
     all_features = []
     all_outcomes = []
     all_hscores = []
 
     start_time = time.time()
 
-    heuristic_name = "NN heuristic" if os.path.exists(WEIGHTS_PATH) else "heuristic_nic"
-    print(f"Generating {NUM_GAMES} self-play games across {NUM_WORKERS} workers")
-    print(f"  Heuristic: {heuristic_name}")
+    # Count modes for logging
+    from collections import Counter
+    mode_counts = Counter(game_modes)
+    print(f"Generating {NUM_GAMES} games across {NUM_WORKERS} workers")
+    print(f"  NN available: {nn_available}")
+    print(f"  Game mix: NN self-play={mode_counts.get(MODE_NN_SELF, 0)}, "
+          f"CH self-play={mode_counts.get(MODE_CH_SELF, 0)}, "
+          f"Cross-play={mode_counts.get(MODE_CROSS, 0)}")
     print(f"  Search depth: {SEARCH_DEPTH} +/- {DEPTH_JITTER}")
     print(f"  Random opening moves: {RANDOM_OPENING_MOVES}")
     print(f"  Epsilon (random move prob): {EPSILON}")
@@ -198,7 +262,7 @@ def main():
     CHUNK_SIZE = min(NUM_WORKERS * 4, SAVE_EVERY)
     games_done = 0
 
-    work_items = [(i, int(game_seeds[i])) for i in range(NUM_GAMES)]
+    work_items = [(i, int(game_seeds[i]), game_modes[i]) for i in range(NUM_GAMES)]
 
     with Pool(processes=NUM_WORKERS, initializer=_init_worker) as pool:
         # imap_unordered gives results as they finish, not in submission order

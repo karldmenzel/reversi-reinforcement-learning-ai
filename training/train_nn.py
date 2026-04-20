@@ -19,7 +19,8 @@ VALIDATION_SPLIT = 0.1
 
 # Dual loss weights
 OUTCOME_WEIGHT = 0.7
-HEURISTIC_WEIGHT_START = 0.3  # decays to 0 over training
+HEURISTIC_WEIGHT_START = 0.3  # decays to floor over training
+HEURISTIC_WEIGHT_FLOOR = 0.05  # minimum heuristic weight (regularizer)
 # ───────────────────────────────────────────────────────────────────────────────
 
 
@@ -104,8 +105,9 @@ def main():
     best_val_loss = float('inf')
 
     for epoch in range(EPOCHS):
-        # Heuristic weight decays linearly to 0
-        h_weight = HEURISTIC_WEIGHT_START * (1.0 - epoch / EPOCHS)
+        # Heuristic weight decays linearly but never below floor
+        h_weight = max(HEURISTIC_WEIGHT_FLOOR,
+                       HEURISTIC_WEIGHT_START * (1.0 - epoch / EPOCHS))
         o_weight = 1.0 - h_weight
 
         # Training
