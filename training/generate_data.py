@@ -35,7 +35,10 @@ def _init_worker():
     global NN_HEURISTIC_FN, CH_HEURISTIC_FN
     CH_HEURISTIC_FN = heuristic_nic
     if os.path.exists(WEIGHTS_PATH):
-        NN_HEURISTIC_FN = NNHeuristic(WEIGHTS_PATH)
+        try:
+            NN_HEURISTIC_FN = NNHeuristic(WEIGHTS_PATH)
+        except (EOFError, Exception):
+            NN_HEURISTIC_FN = None  # weights file exists but is empty/corrupt
     else:
         NN_HEURISTIC_FN = None  # no NN available yet
 
@@ -44,7 +47,7 @@ def _init_worker():
 NUM_GAMES = 10000
 SEARCH_DEPTH = 3              # base depth per move during data generation
 DEPTH_JITTER = 1              # depth varies in [SEARCH_DEPTH - jitter, + jitter]
-TIME_PER_MOVE = 1.5           # seconds per move
+TIME_PER_MOVE = 2.0           # seconds per move
 RANDOM_OPENING_MOVES = 6      # first N moves of each game are fully random
 EPSILON = 0.15               # probability of picking a random move mid-game
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'data')
@@ -236,7 +239,7 @@ def main():
     master_rng = np.random.default_rng(SEED)
     game_seeds = master_rng.integers(0, 2**63, size=NUM_GAMES)
 
-    nn_available = os.path.exists(WEIGHTS_PATH)
+    nn_available = os.path.exists(WEIGHTS_PATH) and os.path.getsize(WEIGHTS_PATH) > 0
     game_modes = _assign_game_modes(NUM_GAMES, nn_available)
 
     all_features = []

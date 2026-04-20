@@ -141,7 +141,7 @@ class NNHeuristic:
                 f"NN weights not found at {weights_path}. "
                 "Run training/train_nn.py first."
             )
-        data = np.load(weights_path)
+        data = np.load(weights_path)  # raises EOFError if file is empty
         self.w1 = data['w1'].astype(np.float32)  # (139, 1024)
         self.b1 = data['b1'].astype(np.float32)   # (1024,)
         self.w2 = data['w2'].astype(np.float32)    # (1024, 512)

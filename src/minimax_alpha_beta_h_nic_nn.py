@@ -10,15 +10,19 @@ from heuristic_functions import heuristic_nic
 
 # ── Heuristic selection ───────────────────────────────────────────────────────
 # Set this to any function with the signature: heuristic(board, player) -> float
-# Option 1: Classic hand-crafted heuristic
-# CHOSEN_HEURISTIC = heuristic_nic
-#
-# Option 2: Neural network heuristic (requires trained weights)
+# Tries to load the NN heuristic; falls back to the classic hand-crafted one
+# if the weights file is missing or empty.
 import os
+from nn_heuristic import NNHeuristic
+
 _weights_path = os.path.join(os.path.dirname(__file__), '', 'weights', 'heuristic_v1.npz')
 
-from nn_heuristic import NNHeuristic
-CHOSEN_HEURISTIC = NNHeuristic(_weights_path)
+try:
+    CHOSEN_HEURISTIC = NNHeuristic(_weights_path)
+except (FileNotFoundError, EOFError):
+    print(f"[WARNING] NN weights not found or empty at {_weights_path}, "
+          "falling back to classic heuristic.")
+    CHOSEN_HEURISTIC = heuristic_nic
 # ─────────────────────────────────────────────────────────────────────────────
 
 TIME_LIMIT = 4.75   # seconds per move
