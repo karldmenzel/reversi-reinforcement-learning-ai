@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 DATA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'training_data.npz')
-WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'weights')
+WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'weights')
 OUTPUT_PATH = os.environ.get('NN_OUTPUT_PATH',
                              os.path.join(WEIGHTS_DIR, 'heuristic_v1.npz'))
 

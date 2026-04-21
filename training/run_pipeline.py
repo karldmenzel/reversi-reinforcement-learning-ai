@@ -22,7 +22,7 @@ from minimax_alpha_beta_h_nic_nn import get_best_move
 # ── Configuration ─────────────────────────────────────────────────────────────
 MIN_CYCLES = 5
 EVAL_GAMES = 25          # games per color (total = 2 * EVAL_GAMES)
-WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'weights')
+WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'weights')
 BEST_WEIGHTS = os.path.join(WEIGHTS_DIR, 'heuristic_v1.npz')
 CANDIDATE_WEIGHTS = os.path.join(WEIGHTS_DIR, 'heuristic_candidate.npz')
 NUM_WORKERS = max(1, cpu_count() - 1)
@@ -182,7 +182,7 @@ def main():
         # ── Step 3: Evaluate ──────────────────────────────────────────
         print(f"\n[Cycle {cycle}] Step 3/3: Evaluating candidate vs baseline...")
 
-        baseline_weights = BEST_WEIGHTS if os.path.exists(BEST_WEIGHTS) else '__CH__'
+        baseline_weights = BEST_WEIGHTS if (os.path.exists(BEST_WEIGHTS) and os.path.getsize(BEST_WEIGHTS) > 0) else '__CH__'
         baseline_name = "previous best NN" if baseline_weights != '__CH__' else "classic heuristic"
         baseline_is_ch = (baseline_weights == '__CH__')
 

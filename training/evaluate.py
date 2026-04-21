@@ -19,7 +19,7 @@ from nn_heuristic import NNHeuristic
 from minimax_alpha_beta_h_nic_nn import get_best_move
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'weights', 'heuristic_v1.npz')
+WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '../src', 'weights', 'heuristic_v1.npz')
 NUM_GAMES = 50  # games per color assignment (total = 2 * NUM_GAMES)
 NUM_WORKERS = max(1, cpu_count() - 1)
 # ───────────────────────────────────────────────────────────────────────────────
