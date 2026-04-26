@@ -2,7 +2,7 @@
 from reversi import reversi
 
 # Algorithm 1 -- update the 'from' to choose a different player
-from greedy_player import choose_move as algorithm_1
+from greedy_player_with_book_openings import choose_move as algorithm_1
 
 # Algorithm 2 -- update the 'from' to choose a different player
 from greedy_player import choose_move as algorithm_2
