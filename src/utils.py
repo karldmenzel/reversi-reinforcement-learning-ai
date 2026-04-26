@@ -1,5 +1,27 @@
 import numpy as np
 
+# ── Zobrist Hashing ──────────────────────────────────────────────────────────
+# Pre-computed random 64-bit integers for incremental board hashing.
+# Index 0 = white (piece == 1), index 1 = black (piece == -1).
+_rng = np.random.RandomState(seed=0xDEADBEEF)
+ZOBRIST_TABLE = _rng.randint(0, 2**63, size=(8, 8, 2), dtype=np.int64)
+ZOBRIST_TURN = int(_rng.randint(0, 2**63, dtype=np.int64))
+
+def _piece_index(piece):
+    """Map piece value (1 or -1) to Zobrist table index (0 or 1)."""
+    return 0 if piece == 1 else 1
+
+def zobrist_hash(board):
+    """Compute the full Zobrist hash of a board from scratch."""
+    h = 0
+    for r in range(8):
+        for c in range(8):
+            p = board[r, c]
+            if p != 0:
+                h ^= int(ZOBRIST_TABLE[r, c, _piece_index(p)])
+    return h
+
+
 def calculate_final_score(board):
     black_tiles = 0
     white_tiles = 0
@@ -28,6 +50,36 @@ def apply_move(board, game, x, y, piece):
     game.board = new_board
     game.step(x, y, piece, True)
     return new_board
+
+def apply_move_with_hash(board, game, x, y, piece, z_hash):
+    """Apply a move and return (new_board, updated_zobrist_hash).
+
+    Incrementally updates the hash by XOR-ing out flipped pieces and
+    XOR-ing in the new ones, plus toggling the side-to-move bit.
+    This is O(flips) instead of O(64).
+    """
+    new_board = board.copy()
+    old_board = board  # reference to original for diff
+
+    game.board = new_board
+    game.step(x, y, piece, True)
+
+    # XOR in the newly placed piece
+    h = z_hash ^ int(ZOBRIST_TABLE[x, y, _piece_index(piece)])
+
+    # XOR out old values and XOR in new values for every flipped cell
+    opponent = -piece
+    opp_idx = _piece_index(opponent)
+    piece_idx = _piece_index(piece)
+    for r in range(8):
+        for c in range(8):
+            if old_board[r, c] == opponent and new_board[r, c] == piece:
+                h ^= int(ZOBRIST_TABLE[r, c, opp_idx]) ^ int(ZOBRIST_TABLE[r, c, piece_idx])
+
+    # Toggle side-to-move
+    h ^= ZOBRIST_TURN
+
+    return new_board, h
 
 # Positional weight matrix for the heuristic evaluation.
 # Corners are highly valuable, edges are good, positions adjacent

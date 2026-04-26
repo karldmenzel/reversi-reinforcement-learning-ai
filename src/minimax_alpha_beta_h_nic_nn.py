@@ -1,36 +1,54 @@
-#Zijie Zhang, Sep.24/2023
-
-import time
-import socket, pickle
-import numpy as np
-from reversi import reversi
-
-from utils import get_legal_moves, apply_move, WEIGHT_MATRIX
-from heuristic_functions import heuristic_nic
+# Zijie Zhang, Sep.24/2023
+# Optimized with: Zobrist TT, PV move ordering, killer moves, incremental hashing
 
 # ── Heuristic selection ───────────────────────────────────────────────────────
 # Set this to any function with the signature: heuristic(board, player) -> float
 # Tries to load the NN heuristic; falls back to the classic hand-crafted one
 # if the weights file is missing or empty.
 import os
-from nn_heuristic import NNHeuristic
+import pickle
+import socket
+import time
 
-_weights_path = os.path.join(os.path.dirname(__file__), '', 'weights', 'heuristic_v1.npz')
+import numpy as np
+
+from heuristic_functions import heuristic_nic
+from nn_heuristic import NNHeuristic
+from reversi import reversi
+from utils import (
+    WEIGHT_MATRIX,
+    ZOBRIST_TURN,
+    apply_move_with_hash,
+    get_legal_moves,
+    zobrist_hash,
+)
+
+_weights_path = os.path.join(
+    os.path.dirname(__file__), "", "weights", "heuristic_candidate_v1.npz"
+)
 
 try:
     CHOSEN_HEURISTIC = NNHeuristic(_weights_path)
 except (FileNotFoundError, EOFError):
-    print(f"[WARNING] NN weights not found or empty at {_weights_path}, "
-          "falling back to classic heuristic.")
+    print(
+        f"[WARNING] NN weights not found or empty at {_weights_path}, "
+        "falling back to classic heuristic."
+    )
     CHOSEN_HEURISTIC = heuristic_nic
 # ─────────────────────────────────────────────────────────────────────────────
 
-TIME_LIMIT = 4.75   # seconds per move
-MAX_DEPTH   = 12   # hard cap; iterative deepening rarely reaches this
+TIME_LIMIT = 4.75  # seconds per move
+MAX_DEPTH = 12  # hard cap; iterative deepening rarely reaches this
+
+# ── Transposition table flags ────────────────────────────────────────────────
+TT_EXACT = 0
+TT_LOWERBOUND = 1
+TT_UPPERBOUND = 2
 
 
 class TimeUp(Exception):
     """Raised inside minimax when the deadline has been exceeded."""
+
     pass
 
 
@@ -44,12 +62,40 @@ def evaluate_final_board(board, player):
     else:
         return 0, None
 
-def minimax(board, game, depth, alpha, beta, maximizing_player, player, deadline, heuristic):
-    """
-    Minimax search with alpha-beta pruning and a hard time deadline.
 
-    Raises TimeUp if the deadline is exceeded so the caller can fall back to
-    the best move found at the previous completed depth.
+def _order_moves(legal_moves, tt_move, killer_moves_at_depth):
+    """Sort moves by: TT move first, then killer moves, then WEIGHT_MATRIX."""
+
+    def sort_key(m):
+        if tt_move is not None and m[0] == tt_move[0] and m[1] == tt_move[1]:
+            return (0, 0)
+        if killer_moves_at_depth is not None:
+            for km in killer_moves_at_depth:
+                if km is not None and m[0] == km[0] and m[1] == km[1]:
+                    return (1, 0)
+        return (2, -WEIGHT_MATRIX[m[0], m[1]])
+
+    return sorted(legal_moves, key=sort_key)
+
+
+def minimax(
+    board,
+    game,
+    depth,
+    alpha,
+    beta,
+    maximizing_player,
+    player,
+    deadline,
+    heuristic,
+    z_hash,
+    tt,
+    killer_moves,
+    pv_move,
+):
+    """
+    Minimax search with alpha-beta pruning, transposition table, killer moves,
+    PV move ordering, and a hard time deadline.
 
     Args:
         board:             current board state (np.ndarray)
@@ -61,6 +107,10 @@ def minimax(board, game, depth, alpha, beta, maximizing_player, player, deadline
         player:            the piece value (1 or -1) of the original caller
         deadline:          time.time() value after which search must stop
         heuristic:         heuristic function that determines the best move
+        z_hash:            current Zobrist hash of the board
+        tt:                transposition table dict
+        killer_moves:      killer_moves[depth] = [move1, move2]
+        pv_move:           principal variation move hint (from previous ID depth)
 
     Returns:
         (score, best_move) tuple
@@ -68,46 +118,92 @@ def minimax(board, game, depth, alpha, beta, maximizing_player, player, deadline
     if time.time() >= deadline:
         raise TimeUp()
 
+    orig_alpha = alpha
+    orig_beta = beta
+
+    # ── TT probe ─────────────────────────────────────────────────────────
+    tt_entry = tt.get(z_hash)
+    tt_move = None
+    if tt_entry is not None and tt_entry[0] >= depth:
+        tt_depth, flag, tt_score, tt_best = tt_entry
+        tt_move = tt_best
+        if flag == TT_EXACT:
+            return tt_score, tt_best
+        if flag == TT_LOWERBOUND:
+            alpha = max(alpha, tt_score)
+        elif flag == TT_UPPERBOUND:
+            beta = min(beta, tt_score)
+        if alpha >= beta:
+            return tt_score, tt_best
+    elif tt_entry is not None:
+        # Shallower entry — still use its best move for ordering
+        tt_move = tt_entry[3]
+
     current_piece = player if maximizing_player else -player
 
     game.board = board.copy()
     legal_moves = get_legal_moves(game, current_piece)
 
-    # Order moves by weight (best squares first) so alpha-beta
-    # encounters tighter bounds earlier and prunes more branches. (eliminating unnecessary searches)
-
-    legal_moves.sort(key=lambda m: WEIGHT_MATRIX[m[0], m[1]], reverse=True)
-
-    # Escape conditions: max depth or no moves for either side
+    # ── Escape conditions: max depth or no moves for either side ─────────
     if depth == 0 or len(legal_moves) == 0:
-
-        # if no available moves it's the opponents "turn" and evaluate their options
         if len(legal_moves) == 0:
             game.board = board.copy()
             opponent_moves = get_legal_moves(game, -current_piece)
 
-            # if they have no moves left. The game is over (not sure if this is necessary)
             if len(opponent_moves) == 0:
-                # Game is over - evaluate by final piece count
-                evaluate_final_board(board, player)
+                # Game is over — use definitive piece-count score (BUG FIX: was missing return)
+                return evaluate_final_board(board, player)
             else:
-                # if opponent has moves, recursively call this function as the minimizing player
-                return minimax(board, game, depth - 1, alpha, beta,
-                               not maximizing_player, player, deadline, heuristic)
+                # Pass turn to opponent (don't decrement depth — no move was played)
+                opp_hash = z_hash ^ ZOBRIST_TURN
+                return minimax(
+                    board,
+                    game,
+                    depth,
+                    alpha,
+                    beta,
+                    not maximizing_player,
+                    player,
+                    deadline,
+                    heuristic,
+                    opp_hash,
+                    tt,
+                    killer_moves,
+                    None,
+                )
 
-        # determine the best move by calculating the score through the heuristic
-        return heuristic(board, player), None
+        score = heuristic(board, player)
+        return score, None
+
+    # ── Move ordering ────────────────────────────────────────────────────
+    # Priority: PV move (root only) > TT move > killer moves > WEIGHT_MATRIX
+    hint_move = pv_move if pv_move is not None else tt_move
+    km_at_depth = killer_moves.get(depth)
+    ordered_moves = _order_moves(legal_moves, hint_move, km_at_depth)
 
     if maximizing_player:
-        max_eval = float('-inf')
-        best_move = legal_moves[0] #obtain the best base move in the sorted array
+        max_eval = float("-inf")
+        best_move = ordered_moves[0]
 
-        # for every move taken, you apply the "best move" to the board and evaluate the potential score through recursively calling minimax function
-        # if the current move in the iteration has a greater score that's the new "best move"
-        for move in legal_moves:
-            new_board = apply_move(board, game, move[0], move[1], current_piece)
-            eval_score, _ = minimax(new_board, game, depth - 1, alpha, beta,
-                                    False, player, deadline, heuristic)
+        for move in ordered_moves:
+            new_board, new_hash = apply_move_with_hash(
+                board, game, move[0], move[1], current_piece, z_hash
+            )
+            eval_score, _ = minimax(
+                new_board,
+                game,
+                depth - 1,
+                alpha,
+                beta,
+                False,
+                player,
+                deadline,
+                heuristic,
+                new_hash,
+                tt,
+                killer_moves,
+                None,
+            )
 
             if eval_score > max_eval:
                 max_eval = eval_score
@@ -115,17 +211,42 @@ def minimax(board, game, depth, alpha, beta, maximizing_player, player, deadline
 
             alpha = max(alpha, eval_score)
             if beta <= alpha:
-                break  # Beta cutoff
+                _store_killer(killer_moves, depth, move)
+                break
+
+        # ── TT store ─────────────────────────────────────────────────────
+        if max_eval >= beta:
+            flag = TT_LOWERBOUND
+        elif max_eval <= orig_alpha:
+            flag = TT_UPPERBOUND
+        else:
+            flag = TT_EXACT
+        tt[z_hash] = (depth, flag, max_eval, best_move)
 
         return max_eval, best_move
-    else: # essentially doing the same as above but looking for the "worst" score (the score that is most detrimental to us)
-        min_eval = float('inf')
-        best_move = legal_moves[0]
+    else:
+        min_eval = float("inf")
+        best_move = ordered_moves[0]
 
-        for move in legal_moves:
-            new_board = apply_move(board, game, move[0], move[1], current_piece)
-            eval_score, _ = minimax(new_board, game, depth - 1, alpha, beta,
-                                    True, player, deadline, heuristic)
+        for move in ordered_moves:
+            new_board, new_hash = apply_move_with_hash(
+                board, game, move[0], move[1], current_piece, z_hash
+            )
+            eval_score, _ = minimax(
+                new_board,
+                game,
+                depth - 1,
+                alpha,
+                beta,
+                True,
+                player,
+                deadline,
+                heuristic,
+                new_hash,
+                tt,
+                killer_moves,
+                None,
+            )
 
             if eval_score < min_eval:
                 min_eval = eval_score
@@ -133,28 +254,63 @@ def minimax(board, game, depth, alpha, beta, maximizing_player, player, deadline
 
             beta = min(beta, eval_score)
             if beta <= alpha:
-                break  # Alpha cutoff
+                _store_killer(killer_moves, depth, move)
+                break
+
+        # ── TT store ─────────────────────────────────────────────────────
+        if min_eval <= alpha:
+            flag = TT_UPPERBOUND
+        elif min_eval >= orig_beta:
+            flag = TT_LOWERBOUND
+        else:
+            flag = TT_EXACT
+        tt[z_hash] = (depth, flag, min_eval, best_move)
 
         return min_eval, best_move
+
+
+def _store_killer(killer_moves, depth, move):
+    """Store a cutoff move in the 2-slot killer table for this depth."""
+    if depth not in killer_moves:
+        killer_moves[depth] = [move, None]
+    else:
+        slots = killer_moves[depth]
+        # Don't store duplicates
+        if slots[0] is not None and slots[0][0] == move[0] and slots[0][1] == move[1]:
+            return
+        slots[1] = slots[0]
+        slots[0] = move
 
 
 def get_best_move(board, game, player, heuristic):
     deadline = time.time() + TIME_LIMIT
     best_move = get_legal_moves(game, player)[0]  # safe fallback
 
+    z_hash = zobrist_hash(board)
+    tt = {}  # fresh transposition table per move decision
+    prev_best_move = None
     for depth in range(1, MAX_DEPTH + 1):
-
-        # try to find best move in given time-limit if time limit is reached. throw exception. return the best move so far
+        killer_moves = {}  # fresh killer table per ID depth
         try:
-            _, move = minimax(board, game, depth,
-                              float('-inf'), float('inf'),
-                              True, player, deadline, heuristic)
+            _, move = minimax(
+                board,
+                game,
+                depth,
+                float("-inf"),
+                float("inf"),
+                True,
+                player,
+                deadline,
+                heuristic,
+                z_hash,
+                tt,
+                killer_moves,
+                prev_best_move,
+            )
             best_move = move  # only update on a fully completed search
-            # print(f"  depth {depth} -> {best_move}")
+            prev_best_move = move  # PV hint for next depth
         except TimeUp:
-            # print(f"  time up at depth {depth}, using depth {depth - 1} result")
             break
-
     return best_move
 
 
@@ -174,23 +330,22 @@ def choose_move(turn, board, game) -> list:
 
 def main():
     game_socket = socket.socket()
-    game_socket.connect(('127.0.0.1', 33333))
+    game_socket.connect(("127.0.0.1", 33333))
     game = reversi()
 
     while True:
-
-        #Receive play request from the server
-        #turn : 1 --> you are playing as white | -1 --> you are playing as black
-        #board : 8*8 numpy array
+        # Receive play request from the server
+        # turn : 1 --> you are playing as white | -1 --> you are playing as black
+        # board : 8*8 numpy array
         data = game_socket.recv(4096)
         turn, board = pickle.loads(data)
 
-        #Turn = 0 indicates game ended
+        # Turn = 0 indicates game ended
         if turn == 0:
             game_socket.close()
             return
 
-        #Debug info
+        # Debug info
         print(turn)
         print(board)
 
@@ -205,9 +360,9 @@ def main():
             x, y = best_move
             print(f"Best move: ({x}, {y})")
 
-        #Send your move to the server. Send (x,y) = (-1,-1) to tell the server you have no hand to play
+        # Send your move to the server. Send (x,y) = (-1,-1) to tell the server you have no hand to play
         game_socket.send(pickle.dumps([x, y]))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
