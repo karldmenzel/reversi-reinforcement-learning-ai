@@ -1,0 +1,13 @@
+{
+  "nn_ratio": 0.45,
+  "ch_ratio": 0.25,
+  "cross_ratio": 0.3,
+  "epsilon": 0.08,
+  "num_games": 10000,
+  "random_opening_moves": 4,
+  "epochs": 170,
+  "lr": 0.0008,
+  "heuristic_weight_start": 0.95,
+  "heuristic_weight_floor": 0.5,
+  "perturbation_strength": 0.0
+}

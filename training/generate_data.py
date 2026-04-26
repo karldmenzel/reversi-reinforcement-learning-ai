@@ -1,5 +1,6 @@
 
 
+
 import sys
 import os
 import time
@@ -8,9 +9,11 @@ from multiprocessing import Pool, cpu_count
 
 # Add src to path so we can import game modules
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+# Add training dir so cycle_utils is importable
+sys.path.insert(0, os.path.dirname(__file__))
 
 from reversi import reversi
-from utils import get_legal_moves, apply_move
+from utils import get_legal_moves, apply_move, zobrist_hash, ZOBRIST_TURN
 from heuristic_functions import heuristic_nic
 from minimax_alpha_beta_h_nic_nn import minimax, TimeUp
 from nn_heuristic import NNHeuristic, extract_features
@@ -45,11 +48,11 @@ def _init_worker():
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 NUM_GAMES = 10000
-SEARCH_DEPTH = 3              # base depth per move during data generation
+SEARCH_DEPTH = 4              # base depth per move during data generation
 DEPTH_JITTER = 1              # depth varies in [SEARCH_DEPTH - jitter, + jitter]
-TIME_PER_MOVE = 2.0           # seconds per move
-RANDOM_OPENING_MOVES = 6      # first N moves of each game are fully random
-EPSILON = 0.15               # probability of picking a random move mid-game
+TIME_PER_MOVE = 3.0           # seconds per move
+RANDOM_OPENING_MOVES = 4      # first N moves of each game are fully random
+EPSILON = 0.08               # probability of picking a random move mid-game
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'data')
 SAVE_EVERY = 500              # save checkpoint every N games
 NUM_WORKERS = max(1, cpu_count() - 1)  # leave 1 core free
@@ -68,7 +71,7 @@ def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
         rng: numpy random generator
 
     Returns:
-        positions: list of (board_copy, current_player, heuristic_score)
+        positions: list of (board_copy, current_player, heuristic_score, move_index)
         outcome:   +1 if white wins, -1 if black wins, 0 draw
     """
     game = reversi()
@@ -98,7 +101,7 @@ def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
 
         # Record position; use hscore_heuristic for the label
         h_score = hscore_heuristic(board, turn)
-        positions.append((board.copy(), turn, h_score))
+        positions.append((board.copy(), turn, h_score, move_number))
 
         # Decide whether to use a random move or minimax
         use_random = (move_number < RANDOM_OPENING_MOVES or
@@ -115,13 +118,19 @@ def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
             search_game.board = board.copy()
             deadline = time.time() + TIME_PER_MOVE
 
+            z_hash = zobrist_hash(board)
+            tt = {}
+            prev_best = None
             best_move = legal_moves[0]
             try:
                 for d in range(1, jittered_depth + 1):
+                    killer_moves = {}
                     _, move = minimax(board, search_game, d,
                                       float('-inf'), float('inf'),
-                                      True, turn, deadline, current_heuristic)
+                                      True, turn, deadline, current_heuristic,
+                                      z_hash, tt, killer_moves, prev_best)
                     best_move = move
+                    prev_best = move
             except TimeUp:
                 pass
 
@@ -173,7 +182,8 @@ def _process_game_result(args):
     ch_fn = CH_HEURISTIC_FN
 
     if game_mode == MODE_NN_SELF and nn_fn is not None:
-        white_h, black_h, hscore_h = nn_fn, nn_fn, nn_fn
+        # Fix: always use CH for h_score labels to avoid circular bias
+        white_h, black_h, hscore_h = nn_fn, nn_fn, ch_fn
     elif game_mode == MODE_CROSS and nn_fn is not None:
         # Alternate who plays white: even games NN=white, odd games NN=black
         if game_idx % 2 == 0:
@@ -192,15 +202,28 @@ def _process_game_result(args):
     outcomes = []
     hscores = []
 
-    for board, player, h_score in positions:
+    total_moves = max(len(positions), 1)
+
+    for board, player, h_score, move_index in positions:
         player_outcome = outcome * player
+
+        # Temporal discounting: early positions get 50% signal, late get 100%
+        discount = 0.5 + 0.5 * (move_index / total_moves)
+        discounted_outcome = player_outcome * discount
+
+        # Create a temporary game for mobility features
+        temp_game = reversi()
+        temp_game.board = board.copy()
 
         aug_boards = augment_d4(board)
         for aug_board in aug_boards:
-            feat = extract_features(aug_board, player)
+            # For augmented boards, create a game for mobility
+            aug_game = reversi()
+            aug_game.board = aug_board.copy()
+            feat = extract_features(aug_board, player, game=aug_game)
             features.append(feat)
-            outcomes.append(player_outcome)
-            hscores.append(np.clip(h_score / 1000.0, -1.0, 1.0))
+            outcomes.append(discounted_outcome)
+            hscores.append(float(np.tanh(h_score / 800.0)))
 
     return features, outcomes, hscores
 
@@ -233,6 +256,18 @@ def _assign_game_modes(num_games, nn_available):
 
 
 def main():
+    global NUM_GAMES, NN_RATIO, CH_RATIO, CROSS_RATIO, EPSILON, RANDOM_OPENING_MOVES
+
+    # Override defaults from adaptive cycle config (if present)
+    from cycle_utils import load_cycle_config
+    cfg = load_cycle_config()
+    NUM_GAMES = int(cfg['num_games'])
+    NN_RATIO = float(cfg['nn_ratio'])
+    CH_RATIO = float(cfg['ch_ratio'])
+    CROSS_RATIO = float(cfg['cross_ratio'])
+    EPSILON = float(cfg['epsilon'])
+    RANDOM_OPENING_MOVES = int(cfg['random_opening_moves'])
+
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # Generate unique seeds for each game up front
