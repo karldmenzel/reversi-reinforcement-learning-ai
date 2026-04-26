@@ -7,7 +7,7 @@ TRAINING_DIR = os.path.dirname(__file__)
 CYCLE_CONFIG_PATH = os.path.join(TRAINING_DIR, 'cycle_config.json')
 TRAIN_METRICS_PATH = os.path.join(TRAINING_DIR, 'train_metrics.json')
 
-# Default values matching the current hardcoded constants across the pipeline.
+# Default values matching Charles's training configuration.
 DEFAULTS = {
     # generate_data.py defaults
     'nn_ratio': 0.5,
@@ -18,13 +18,10 @@ DEFAULTS = {
     'random_opening_moves': 4,
 
     # train_nn.py defaults
-    'epochs': 150,
+    'epochs': 80,
     'lr': 0.001,
-    'heuristic_weight_start': 0.9,
-    'heuristic_weight_floor': 0.5,
-
-    # weight matrix perturbation (run_pipeline.py)
-    'perturbation_strength': 0.0,
+    'heuristic_weight_start': 0.3,
+    'heuristic_weight_floor': 0.05,
 }
 
 

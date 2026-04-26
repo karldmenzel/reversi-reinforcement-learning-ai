@@ -1,12 +1,6 @@
-import os
 import numpy as np
 from reversi import reversi
 from utils import get_legal_moves, WEIGHT_MATRIX, CENTER_BONUS
-
-# During adaptive training, load perturbed WEIGHT_MATRIX if env var is set
-_cycle_wm = os.environ.get('CYCLE_WEIGHT_MATRIX_PATH', '')
-if _cycle_wm and os.path.exists(_cycle_wm):
-    WEIGHT_MATRIX = np.load(_cycle_wm)
 
 def heuristic_nic_2(board, player):
     """

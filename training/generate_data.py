@@ -71,7 +71,7 @@ def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
         rng: numpy random generator
 
     Returns:
-        positions: list of (board_copy, current_player, heuristic_score, move_index)
+        positions: list of (board_copy, current_player, heuristic_score)
         outcome:   +1 if white wins, -1 if black wins, 0 draw
     """
     game = reversi()
@@ -101,7 +101,7 @@ def play_game(depth, white_heuristic, black_heuristic, hscore_heuristic, rng):
 
         # Record position; use hscore_heuristic for the label
         h_score = hscore_heuristic(board, turn)
-        positions.append((board.copy(), turn, h_score, move_number))
+        positions.append((board.copy(), turn, h_score))
 
         # Decide whether to use a random move or minimax
         use_random = (move_number < RANDOM_OPENING_MOVES or
@@ -202,28 +202,15 @@ def _process_game_result(args):
     outcomes = []
     hscores = []
 
-    total_moves = max(len(positions), 1)
-
-    for board, player, h_score, move_index in positions:
+    for board, player, h_score in positions:
         player_outcome = outcome * player
-
-        # Temporal discounting: early positions get 50% signal, late get 100%
-        discount = 0.5 + 0.5 * (move_index / total_moves)
-        discounted_outcome = player_outcome * discount
-
-        # Create a temporary game for mobility features
-        temp_game = reversi()
-        temp_game.board = board.copy()
 
         aug_boards = augment_d4(board)
         for aug_board in aug_boards:
-            # For augmented boards, create a game for mobility
-            aug_game = reversi()
-            aug_game.board = aug_board.copy()
-            feat = extract_features(aug_board, player, game=aug_game)
+            feat = extract_features(aug_board, player)
             features.append(feat)
-            outcomes.append(discounted_outcome)
-            hscores.append(float(np.tanh(h_score / 800.0)))
+            outcomes.append(player_outcome)
+            hscores.append(float(np.clip(h_score / 1000.0, -1.0, 1.0)))
 
     return features, outcomes, hscores
 
