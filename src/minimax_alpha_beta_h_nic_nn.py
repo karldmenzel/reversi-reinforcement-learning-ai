@@ -24,7 +24,7 @@ from utils import (
 )
 
 _weights_path = os.path.join(
-    os.path.dirname(__file__), "", "weights", "heuristic_v1.npz"
+    os.path.dirname(__file__), "", "weights", "heuristic_best_v2.npz"
 )
 
 try:
