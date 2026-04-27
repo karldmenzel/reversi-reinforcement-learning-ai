@@ -5,21 +5,23 @@ Each matchup plays games as both colors for fairness.
 Uses multiprocessing to parallelize independent games.
 """
 
-import sys
 import os
+import sys
 import time
 from multiprocessing import Pool, cpu_count
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from heuristic_functions import heuristic_nic
+from minimax_alpha_beta_h_nic_nn import get_best_move
+from nn_heuristic import NNHeuristic
 from reversi import reversi
 from utils import get_legal_moves
-from heuristic_functions import heuristic_nic
-from nn_heuristic import NNHeuristic
-from minimax_alpha_beta_h_nic_nn import get_best_move
 
 # ── Configuration ──────────────────────────────────────────────────────────────
-WEIGHTS_PATH = os.path.join(os.path.dirname(__file__), '../src', 'weights', 'heuristic_candidate.npz')
+WEIGHTS_PATH = os.path.join(
+    os.path.dirname(__file__), "../src", "weights", "heuristic_candidate.npz"
+)
 NUM_GAMES = 50  # games per color assignment (total = 2 * NUM_GAMES)
 NUM_WORKERS = max(1, cpu_count() - 1)
 # ───────────────────────────────────────────────────────────────────────────────
@@ -27,6 +29,7 @@ NUM_WORKERS = max(1, cpu_count() - 1)
 
 def make_choose_move(heuristic):
     """Create a choose_move function compatible with AutoGameServer."""
+
     def choose_move(turn, board, game):
         search_game = reversi()
         search_game.board = board.copy()
@@ -35,6 +38,7 @@ def make_choose_move(heuristic):
             return [-1, -1]
         x, y = get_best_move(board, search_game, turn, heuristic)
         return [x, y]
+
     return choose_move
 
 
@@ -98,8 +102,9 @@ def main():
     start_time = time.time()
 
     # Build work items: half as white, half as black
-    work_items = [(i, True) for i in range(NUM_GAMES)] + \
-                 [(i, False) for i in range(NUM_GAMES)]
+    work_items = [(i, True) for i in range(NUM_GAMES)] + [
+        (i, False) for i in range(NUM_GAMES)
+    ]
 
     print(f"\n--- Running {total_games} games ({NUM_GAMES} per color) ---")
 
@@ -115,7 +120,13 @@ def main():
                     classic_wins += 1
                 else:
                     draws += 1
-                outcome = 'NN wins' if result == 1 else 'Classic wins' if result == -1 else 'Draw'
+                outcome = (
+                    "NN wins"
+                    if result == 1
+                    else "Classic wins"
+                    if result == -1
+                    else "Draw"
+                )
             else:
                 if result == -1:
                     nn_wins += 1
@@ -123,12 +134,20 @@ def main():
                     classic_wins += 1
                 else:
                     draws += 1
-                outcome = 'NN wins' if result == -1 else 'Classic wins' if result == 1 else 'Draw'
+                outcome = (
+                    "NN wins"
+                    if result == -1
+                    else "Classic wins"
+                    if result == 1
+                    else "Draw"
+                )
 
             color = "White" if nn_is_white else "Black"
-            print(f"  Game {completed}/{total_games} (NN={color}): "
-                  f"{outcome} | "
-                  f"Running: NN {nn_wins} - Classic {classic_wins} - Draws {draws}")
+            print(
+                f"  Game {completed}/{total_games} (NN={color}): "
+                f"{outcome} | "
+                f"Running: NN {nn_wins} - Classic {classic_wins} - Draws {draws}"
+            )
 
     elapsed = time.time() - start_time
 
@@ -136,7 +155,9 @@ def main():
     print(f"RESULTS ({total_games} games, {elapsed:.0f}s)")
     print(f"{'=' * 50}")
     print(f"  NN Heuristic:  {nn_wins} wins ({100 * nn_wins / total_games:.1f}%)")
-    print(f"  Classic:       {classic_wins} wins ({100 * classic_wins / total_games:.1f}%)")
+    print(
+        f"  Classic:       {classic_wins} wins ({100 * classic_wins / total_games:.1f}%)"
+    )
     print(f"  Draws:         {draws} ({100 * draws / total_games:.1f}%)")
     print(f"{'=' * 50}")
 
@@ -148,5 +169,5 @@ def main():
         print("It's a tie!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
