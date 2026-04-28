@@ -85,6 +85,7 @@ def export_checkpoint(epoch, val_loss, train_loss, model, optimizer, path):
         'train_loss': train_loss,
     }
 
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     torch.save(checkpoint, path)
 
 

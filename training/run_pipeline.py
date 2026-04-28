@@ -5,6 +5,7 @@ model is evaluated against the previous best. If it wins, it becomes the new
 best and is used for the next round of data generation.
 """
 
+import argparse
 import json
 import os
 import shutil
@@ -290,77 +291,126 @@ def run_training(output_path):
         raise RuntimeError("Training failed")
 
 
-def main():
-    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+STEPS = ["datagen", "train", "eval"]
 
-    print("=" * 60)
-    print("ITERATIVE TRAINING PIPELINE")
-    print(f"  Cycles: {MIN_CYCLES}")
-    print(f"  Eval games per color: {EVAL_GAMES} (total: {EVAL_GAMES * 2})")
-    print(f"  Workers: {NUM_WORKERS}")
-    print("=" * 60)
 
-    # Initialize adaptive config with defaults
-    current_config = dict(DEFAULTS)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Iterative training pipeline for Reversi NN.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+examples:
+  # Run full pipeline from scratch (default)
+  python run_pipeline.py
 
-    for cycle in range(1, MIN_CYCLES + 1):
-        cycle_start = time.time()
-        print(f"\n{'#' * 60}")
-        print(f"# CYCLE {cycle}/{MIN_CYCLES}")
-        print(f"{'#' * 60}")
+  # Resume at cycle 3, starting from training step
+  python run_pipeline.py --start-cycle 3 --start-step train
 
-        # ── Write adaptive config for subprocesses ────────────────────
-        write_cycle_config(current_config)
-        print(f"\n  Cycle config: {json.dumps(current_config, indent=2)}")
+  # Resume at cycle 4, starting from evaluation
+  python run_pipeline.py --start-cycle 4 --start-step eval
 
-        # ── Skip datagen if cycle >= 2 and no best weights exist ──────
-        skip_datagen = (cycle >= 2 and not os.path.exists(BEST_WEIGHTS))
+  # Run 10 cycles instead of the default
+  python run_pipeline.py --cycles 10
 
+  # Resume at cycle 5, run through cycle 8
+  python run_pipeline.py --start-cycle 5 --cycles 8
+""",
+    )
+    parser.add_argument(
+        "--start-cycle",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Cycle number to resume from (default: 1)",
+    )
+    parser.add_argument(
+        "--start-step",
+        choices=STEPS,
+        default="datagen",
+        help="Step to resume from within the start cycle: "
+        "datagen, train, eval (default: datagen)",
+    )
+    parser.add_argument(
+        "--cycles",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Total number of cycles to run (default: {MIN_CYCLES})",
+    )
+    return parser.parse_args()
+
+
+def run_cycle(cycle, total_cycles, current_config, skip_steps):
+    """Run a single pipeline cycle. skip_steps is a set of step names to skip."""
+    cycle_start = time.time()
+    print(f"\n{'#' * 60}")
+    print(f"# CYCLE {cycle}/{total_cycles}")
+    print(f"{'#' * 60}")
+
+    # ── Write adaptive config for subprocesses ────────────────────
+    write_cycle_config(current_config)
+    print(f"\n  Cycle config: {json.dumps(current_config, indent=2)}")
+
+    # ── Step 1: Generate data ─────────────────────────────────────
+    if "datagen" not in skip_steps:
+        skip_datagen = cycle >= 2 and not os.path.exists(BEST_WEIGHTS)
         if not skip_datagen:
-            # ── Step 1: Generate data ─────────────────────────────────
-            print(f"\n[Cycle {cycle}] Step 1/4: Generating self-play data...")
+            print(f"\n[Cycle {cycle}] Step 1/3: Generating self-play data...")
             accumulated_path = os.path.join(DATA_DIR, "accumulated_data.npz")
             if os.path.exists(TRAINING_DATA_PATH) and cycle > 1:
                 shutil.copy2(TRAINING_DATA_PATH, accumulated_path)
             run_generate_data()
 
-            # ── Step 1.5: Merge with accumulated data ─────────────────
-            print(f"\n[Cycle {cycle}] Step 2/4: Merging training data...")
+            print(f"\n[Cycle {cycle}] Merging training data...")
             merge_training_data(
                 TRAINING_DATA_PATH, accumulated_path, MAX_ACCUMULATED_SAMPLES
             )
         else:
-            print(f"\n  Skipping data gen (no best weights yet, reusing existing data)")
-
-        # ── Step 2: Train ─────────────────────────────────────────────
-        print(f"\n[Cycle {cycle}] Step 3/4: Training NN...")
-        run_training(CANDIDATE_WEIGHTS)
-
-        # ── Read training metrics ─────────────────────────────────────
-        metrics = load_train_metrics()
-        if metrics:
             print(
-                f"  Training metrics: epochs_run={metrics.get('epochs_run')}, "
-                f"best_val_loss={metrics.get('best_val_loss', 0):.4f}"
+                f"\n  Skipping data gen (no best weights yet, reusing existing data)"
             )
+    else:
+        print(f"\n[Cycle {cycle}] Skipping datagen (resuming past this step)")
 
-        # ── Step 3: Evaluate ──────────────────────────────────────────
-        print(f"\n[Cycle {cycle}] Step 4/4: Evaluating candidate vs baseline...")
+    # ── Step 2: Train ─────────────────────────────────────────────
+    if "train" not in skip_steps:
+        print(f"\n[Cycle {cycle}] Step 2/3: Training NN...")
+        run_training(CANDIDATE_WEIGHTS)
+    else:
+        print(f"\n[Cycle {cycle}] Skipping training (resuming past this step)")
+
+    # ── Read training metrics ─────────────────────────────────────
+    metrics = load_train_metrics()
+    if metrics:
+        print(
+            f"  Training metrics: epochs_run={metrics.get('epochs_run')}, "
+            f"best_val_loss={metrics.get('best_val_loss', 0):.4f}"
+        )
+
+    # ── Step 3: Evaluate ──────────────────────────────────────────
+    c_wins, b_wins, draws = 0, 0, 0
+    if "eval" not in skip_steps:
+        print(f"\n[Cycle {cycle}] Step 3/3: Evaluating candidate vs baseline...")
 
         baseline_weights = (
             BEST_WEIGHTS
-            if (os.path.exists(BEST_WEIGHTS) and os.path.getsize(BEST_WEIGHTS) > 0)
+            if (
+                os.path.exists(BEST_WEIGHTS)
+                and os.path.getsize(BEST_WEIGHTS) > 0
+            )
             else "__CH__"
         )
         baseline_name = (
-            "previous best NN" if baseline_weights != "__CH__" else "classic heuristic"
+            "previous best NN"
+            if baseline_weights != "__CH__"
+            else "classic heuristic"
         )
         baseline_is_ch = baseline_weights == "__CH__"
 
         print(f"  Candidate: {CANDIDATE_WEIGHTS}")
         print(f"  Baseline:  {baseline_name}")
 
-        # ── Gate 1: candidate vs baseline ────────────────────────────
+        # ── Gate 1: candidate vs baseline ────────────────────────
         print(f"\n  [Gate 1] Candidate vs {baseline_name}")
         c_wins, b_wins, draws = evaluate(
             CANDIDATE_WEIGHTS, baseline_weights, EVAL_GAMES
@@ -376,7 +426,7 @@ def main():
 
         passed_gate1 = c_wins >= b_wins
 
-        # ── Gate 2: candidate vs CH (skip if baseline is already CH) ─
+        # ── Gate 2: candidate vs CH (skip if baseline is already CH)
         if baseline_is_ch:
             passed_gate2 = True
             print(f"\n  [Gate 2] Skipped (baseline is already CH)")
@@ -390,12 +440,12 @@ def main():
             print(
                 f"\n  Gate 2 Results: Candidate {ch_c_wins}/{ch_total} "
                 f"({100 * ch_c_wins / ch_total:.1f}%) | "
-                f"CH {ch_b_wins}/{ch_total} ({100 * ch_b_wins / ch_total:.1f}%) | "
+                f"CH {ch_b_wins}/{ch_total} "
+                f"({100 * ch_b_wins / ch_total:.1f}%) | "
                 f"Draws {ch_draws}"
             )
             passed_gate2 = ch_c_wins >= ch_b_wins
 
-        # Promote candidate only if it passes both gates
         promoted = passed_gate1 and passed_gate2
         if promoted:
             shutil.copy2(CANDIDATE_WEIGHTS, BEST_WEIGHTS)
@@ -408,30 +458,79 @@ def main():
                 reasons.append("lost to CH")
             print(f"  >> Candidate rejected ({', '.join(reasons)})")
 
-        # Clean up candidate file
         if os.path.exists(CANDIDATE_WEIGHTS):
             os.remove(CANDIDATE_WEIGHTS)
+    else:
+        print(f"\n[Cycle {cycle}] Skipping eval (resuming past this step)")
 
-        # ── Compute next cycle's adaptive config ──────────────────────
+    elapsed = time.time() - cycle_start
+    print(f"\n  Cycle {cycle} completed in {elapsed:.0f}s")
+
+    return metrics, c_wins, b_wins, draws
+
+
+def main():
+    args = parse_args()
+
+    total_cycles = args.cycles if args.cycles is not None else MIN_CYCLES
+    start_cycle = args.start_cycle
+    start_step = args.start_step
+
+    if start_cycle > total_cycles:
+        print(
+            f"Error: --start-cycle ({start_cycle}) exceeds "
+            f"total cycles ({total_cycles})"
+        )
+        sys.exit(1)
+
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+
+    print("=" * 60)
+    print("ITERATIVE TRAINING PIPELINE")
+    print(f"  Cycles: {start_cycle} -> {total_cycles}")
+    if start_step != "datagen":
+        print(f"  Resuming at step: {start_step}")
+    print(f"  Eval games per color: {EVAL_GAMES} (total: {EVAL_GAMES * 2})")
+    print(f"  Workers: {NUM_WORKERS}")
+    print("=" * 60)
+
+    current_config = dict(DEFAULTS)
+
+    # If resuming and a cycle config exists on disk, reload it
+    if start_cycle > 1 and os.path.exists(CYCLE_CONFIG_PATH):
+        current_config = load_cycle_config()
+        print(f"  Loaded existing cycle config from {CYCLE_CONFIG_PATH}")
+
+    for cycle in range(start_cycle, total_cycles + 1):
+        # On the first cycle of a resume, skip steps before start_step
+        if cycle == start_cycle and start_step != "datagen":
+            step_idx = STEPS.index(start_step)
+            skip_steps = set(STEPS[:step_idx])
+        else:
+            skip_steps = set()
+
+        metrics, c_wins, b_wins, draws = run_cycle(
+            cycle, total_cycles, current_config, skip_steps
+        )
+
+        # ── Compute next cycle's adaptive config ──────────────────
         old_config = dict(current_config)
         current_config = compute_next_config(
             cycle, current_config, metrics, c_wins, b_wins, draws
         )
 
-        # Print config changes
         changes = []
         for key in sorted(current_config):
             if old_config.get(key) != current_config.get(key):
-                changes.append(f"    {key}: {old_config.get(key)} -> {current_config.get(key)}")
+                changes.append(
+                    f"    {key}: {old_config.get(key)} -> {current_config.get(key)}"
+                )
         if changes:
             print("  Config changes for next cycle:")
             for line in changes:
                 print(line)
 
-        elapsed = time.time() - cycle_start
-        print(f"\n  Cycle {cycle} completed in {elapsed:.0f}s")
-
-    # ── Cleanup adaptive artifacts ────────────────────────────────────
+    # ── Cleanup adaptive artifacts ────────────────────────────────
     for path in [CYCLE_CONFIG_PATH, TRAIN_METRICS_PATH]:
         if os.path.exists(path):
             os.remove(path)

@@ -44,6 +44,7 @@ MAX_DEPTH = 15  # hard cap;
 TT_EXACT = 0
 TT_LOWERBOUND = 1
 TT_UPPERBOUND = 2
+depth_tot = 0
 
 
 class TimeUp(Exception):
@@ -289,6 +290,7 @@ def get_best_move(board, game, player, heuristic):
     tt = {}  # fresh transposition table per move decision
     prev_best_move = None
     c_Depth = 0
+
     for depth in range(1, MAX_DEPTH + 1):
         killer_moves = {}  # fresh killer table per ID depth
         try:
@@ -313,7 +315,7 @@ def get_best_move(board, game, player, heuristic):
         except TimeUp:
             break
 
-    print(f"depth NN: {c_Depth}")
+    depth_tot += c_Depth
     return best_move
 
 
@@ -335,7 +337,7 @@ def main():
     game_socket = socket.socket()
     game_socket.connect(("127.0.0.1", 33333))
     game = reversi()
-
+    number_of_moves = 0
     while True:
         # Receive play request from the server
         # turn : 1 --> you are playing as white | -1 --> you are playing as black
@@ -360,11 +362,13 @@ def main():
             x, y = -1, -1
         else:
             best_move = get_best_move(board, game, turn, CHOSEN_HEURISTIC)
+            number_of_moves += 1
             x, y = best_move
             print(f"Best move: ({x}, {y})")
 
         # Send your move to the server. Send (x,y) = (-1,-1) to tell the server you have no hand to play
         game_socket.send(pickle.dumps([x, y]))
+    print(f"Average depth: {depth_tot / number_of_moves}")
 
 
 if __name__ == "__main__":
