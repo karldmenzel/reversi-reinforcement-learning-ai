@@ -24,7 +24,7 @@ from utils import (
 )
 
 _weights_path = os.path.join(
-    os.path.dirname(__file__), "", "weights", "heuristic_best_v2.npz"
+    os.path.dirname(__file__), "", "weights", "heuristic_best_v3.npz"
 )
 
 try:
@@ -37,8 +37,8 @@ except (FileNotFoundError, EOFError):
     CHOSEN_HEURISTIC = heuristic_nic
 # ─────────────────────────────────────────────────────────────────────────────
 
-TIME_LIMIT = 4.75  # seconds per move
-MAX_DEPTH = 12  # hard cap; iterative deepening rarely reaches this
+TIME_LIMIT = 4.90  # seconds per move
+MAX_DEPTH = 15  # hard cap;
 
 # ── Transposition table flags ────────────────────────────────────────────────
 TT_EXACT = 0
@@ -270,7 +270,6 @@ def minimax(
 
 
 def _store_killer(killer_moves, depth, move):
-    """Store a cutoff move in the 2-slot killer table for this depth."""
     if depth not in killer_moves:
         killer_moves[depth] = [move, None]
     else:
@@ -289,6 +288,7 @@ def get_best_move(board, game, player, heuristic):
     z_hash = zobrist_hash(board)
     tt = {}  # fresh transposition table per move decision
     prev_best_move = None
+    c_Depth = 0
     for depth in range(1, MAX_DEPTH + 1):
         killer_moves = {}  # fresh killer table per ID depth
         try:
@@ -309,8 +309,11 @@ def get_best_move(board, game, player, heuristic):
             )
             best_move = move  # only update on a fully completed search
             prev_best_move = move  # PV hint for next depth
+            c_Depth += 1
         except TimeUp:
             break
+
+    print(f"depth NN: {c_Depth}")
     return best_move
 
 
@@ -346,8 +349,8 @@ def main():
             return
 
         # Debug info
-        print(turn)
-        print(board)
+        # print(turn)
+        # print(board)
 
         # Find best move via iterative-deepening minimax (4-second limit)
         game.board = board.copy()

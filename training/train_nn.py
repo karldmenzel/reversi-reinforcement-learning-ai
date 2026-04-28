@@ -13,6 +13,7 @@ DATA_PATH = os.path.join(os.path.dirname(__file__), 'data', 'training_data.npz')
 WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), '..', 'src', 'weights')
 OUTPUT_PATH = os.environ.get('NN_OUTPUT_PATH',
                              os.path.join(WEIGHTS_DIR, 'heuristic_v1.npz'))
+CHECKPOINT_PATH = os.path.join(os.path.dirname(__file__), '..', 'src', 'checkpoints/checkpoint.pth.tar')
 
 BATCH_SIZE = 512
 EPOCHS = 80
@@ -73,6 +74,18 @@ def export_weights(model, path):
         b4=state['net.6.bias'].cpu().numpy(),
     )
     print(f"Exported weights to {path}")
+
+
+def export_checkpoint(epoch, val_loss, train_loss, model, optimizer, path):
+    checkpoint = {
+        epoch: epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'val_loss': val_loss,
+        'train_loss': train_loss,
+    }
+
+    torch.save(checkpoint, path)
 
 
 def main():
@@ -182,6 +195,7 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             export_weights(model, OUTPUT_PATH)
+            export_checkpoint(epoch, best_val_loss, train_loss, model, optimizer, CHECKPOINT_PATH)
             print(f"  -> New best val_loss: {best_val_loss:.4f}")
 
     epochs_run = EPOCHS

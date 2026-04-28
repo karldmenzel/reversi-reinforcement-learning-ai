@@ -186,6 +186,7 @@ def get_best_move(board, game, player, heuristic):
     deadline = time.time() + TIME_LIMIT
     best_move = get_legal_moves(game, player)[0]  # safe fallback
 
+    c_Depth = 0
     for depth in range(1, MAX_DEPTH + 1):
         # try to find best move in given time-limit if time limit is reached. throw exception. return the best move so far
         try:
@@ -202,10 +203,12 @@ def get_best_move(board, game, player, heuristic):
             )
             best_move = move  # only update on a fully completed search
             # print(f"  depth {depth} -> {best_move}")
+            c_Depth += 1
         except TimeUp:
             # print(f"  time up at depth {depth}, using depth {depth - 1} result")
             break
 
+    print(f"Depth C: {c_Depth}")
     return best_move
 
 
@@ -241,8 +244,8 @@ def main():
             return
 
         # Debug info
-        print(turn)
-        print(board)
+        # print(turn)
+        # print(board)
 
         # Find best move via iterative-deepening minimax (4-second limit)
         game.board = board.copy()
