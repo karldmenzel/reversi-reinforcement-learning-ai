@@ -18,7 +18,7 @@ from reversi import reversi
 from utils import apply_move, get_legal_moves  # , WEIGHT_MATRIX
 
 _weights_path = os.path.join(
-    os.path.dirname(__file__), "", "weights", "heuristic_v1_adj.npz"
+    os.path.dirname(__file__), "", "weights", "heuristic_best_v5.npz"
 )
 
 from nn_heuristic import NNHeuristic
@@ -26,19 +26,19 @@ from nn_heuristic import NNHeuristic
 CHOSEN_HEURISTIC = NNHeuristic(_weights_path)
 # ─────────────────────────────────────────────────────────────────────────────
 
-TIME_LIMIT = 4.75  # seconds per move
+TIME_LIMIT = 4.90  # seconds per move
 MAX_DEPTH = 12  # hard cap; iterative deepening rarely reaches this
 
 WEIGHT_MATRIX = np.array(
     [
-        [1000, 200, 100, 50, 50, 100, 200, 1000],
-        [200, 50, 2, 2, 2, 2, 50, 200],
-        [100, 2, 5, 1, 1, 5, 2, 100],
-        [50, 2, 1, 0, 0, 1, 2, 50],
-        [50, 2, 1, 0, 0, 1, 2, 50],
-        [100, 2, 5, 1, 1, 5, 2, 100],
-        [200, 50, 2, 2, 2, 2, 50, 200],
-        [1000, 200, 100, 50, 50, 100, 200, 1000],
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
+        [-20, -20, 2, 2, 2, 2, 50, -20],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [-20, -20, 2, 2, 2, 2, -20, -20],
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
     ]
 )
 

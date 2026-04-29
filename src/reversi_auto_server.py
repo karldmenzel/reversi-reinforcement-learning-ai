@@ -1,11 +1,9 @@
-
+# Algorithm 1 -- update the 'from' to choose a different player
+# Algorithm 2 -- update the 'from' to choose a different player
+from minimax_alpha_beta_h_nic_nn import choose_move as algorithm_1
+from minimax_alpha_beta_h_nic_nn_copy import choose_move as algorithm_2
 from reversi import reversi
 
-# Algorithm 1 -- update the 'from' to choose a different player
-from greedy_player import choose_move as algorithm_1
-
-# Algorithm 2 -- update the 'from' to choose a different player
-from greedy_player import choose_move as algorithm_2
 
 class AutoGameServer:
     def __init__(self, player1, player2):
@@ -32,7 +30,9 @@ class AutoGameServer:
             # Player passes
             if x == -1 and y == -1:
                 consecutive_passes += 1
-                print(f"Player {'White' if self.turn == 1 else 'Black'} has no valid moves, passes.")
+                print(
+                    f"Player {'White' if self.turn == 1 else 'Black'} has no valid moves, passes."
+                )
             else:
                 result = self.game.step(x, y, self.turn)
 
@@ -42,7 +42,9 @@ class AutoGameServer:
                 else:
                     # Illegal move → treat as pass
                     consecutive_passes += 1
-                    print(f"Illegal move by {'White' if self.turn == 1 else 'Black'} → treated as pass.")
+                    print(
+                        f"Illegal move by {'White' if self.turn == 1 else 'Black'} → treated as pass."
+                    )
 
             # End condition
             if consecutive_passes >= 2:
@@ -65,6 +67,7 @@ class AutoGameServer:
             print(f"Game is a draw, {black} to {white}!\n")
             return 0
 
+
 if __name__ == "__main__":
     algorithm_1_wins = 0
     algorithm_2_wins = 0
@@ -73,25 +76,29 @@ if __name__ == "__main__":
     algorithm_1_name = algorithm_1.__module__
     algorithm_2_name = algorithm_2.__module__
 
-    print(f"Beginning game one, algorithm 1 ({algorithm_1_name}) is white, algorithm 2 ({algorithm_2_name}) is black.")
+    print(
+        f"Beginning game one, algorithm 1 ({algorithm_1_name}) is white, algorithm 2 ({algorithm_2_name}) is black."
+    )
     game1 = AutoGameServer(
         player1=algorithm_1,  # White
-        player2=algorithm_2   # Black
+        player2=algorithm_2,  # Black
     )
 
     game1_winner = game1.play_game()
 
-    if(game1_winner == 1):
+    if game1_winner == 1:
         algorithm_1_wins += 1
-    elif (game1_winner == -1):
+    elif game1_winner == -1:
         algorithm_2_wins += 1
     else:
         draws += 1
 
-    print(f"Beginning game two, algorithm 1 ({algorithm_1_name}) is black, algorithm 2 ({algorithm_2_name}) is white.")
+    print(
+        f"Beginning game two, algorithm 1 ({algorithm_1_name}) is black, algorithm 2 ({algorithm_2_name}) is white."
+    )
     game2 = AutoGameServer(
         player1=algorithm_2,  # White
-        player2=algorithm_1   # Black
+        player2=algorithm_1,  # Black
     )
 
     game2_winner = game2.play_game()
@@ -106,7 +113,9 @@ if __name__ == "__main__":
     final_result = game1_winner + game2_winner
 
     if algorithm_1_wins == algorithm_2_wins:
-        print(f"Final result: both algorithms tied ({algorithm_1_name} and {algorithm_2_name}).")
+        print(
+            f"Final result: both algorithms tied ({algorithm_1_name} and {algorithm_2_name})."
+        )
     elif algorithm_1_wins > algorithm_2_wins:
         print(f"Final result: algorithm 1 ({algorithm_1_name}) wins.")
     else:

@@ -16,7 +16,6 @@ from heuristic_functions import heuristic_nic
 from nn_heuristic import NNHeuristic
 from reversi import reversi
 from utils import (
-    WEIGHT_MATRIX,
     ZOBRIST_TURN,
     apply_move_with_hash,
     get_legal_moves,
@@ -24,7 +23,7 @@ from utils import (
 )
 
 _weights_path = os.path.join(
-    os.path.dirname(__file__), "", "weights", "heuristic_best_v3.npz"
+    os.path.dirname(__file__), "", "weights", "heuristic_best_v4.npz"
 )
 
 try:
@@ -44,7 +43,19 @@ MAX_DEPTH = 15  # hard cap;
 TT_EXACT = 0
 TT_LOWERBOUND = 1
 TT_UPPERBOUND = 2
-depth_tot = 0
+
+WEIGHT_MATRIX = np.array(
+    [
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
+        [-20, -20, 2, 2, 2, 2, 50, -20],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [-20, -20, 2, 2, 2, 2, -20, -20],
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
+    ]
+)
 
 
 class TimeUp(Exception):
@@ -289,7 +300,6 @@ def get_best_move(board, game, player, heuristic):
     z_hash = zobrist_hash(board)
     tt = {}  # fresh transposition table per move decision
     prev_best_move = None
-    c_Depth = 0
 
     for depth in range(1, MAX_DEPTH + 1):
         killer_moves = {}  # fresh killer table per ID depth
@@ -311,11 +321,8 @@ def get_best_move(board, game, player, heuristic):
             )
             best_move = move  # only update on a fully completed search
             prev_best_move = move  # PV hint for next depth
-            c_Depth += 1
         except TimeUp:
             break
-
-    depth_tot += c_Depth
     return best_move
 
 
@@ -368,7 +375,6 @@ def main():
 
         # Send your move to the server. Send (x,y) = (-1,-1) to tell the server you have no hand to play
         game_socket.send(pickle.dumps([x, y]))
-    print(f"Average depth: {depth_tot / number_of_moves}")
 
 
 if __name__ == "__main__":

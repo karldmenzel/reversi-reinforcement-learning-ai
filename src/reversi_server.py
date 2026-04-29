@@ -170,13 +170,27 @@ def main():
     p1thread.join()
     p2thread.join()
 
-    escape_flag = False
+    # Display final result and wait for user to close
+    screen.blit(background_surface,(0,0))
+    for i in range(7):
+        pygame.draw.line(screen, (255,255,255), (100*i + 100, 0), (100*i + 100, 800), 2)
+        pygame.draw.line(screen, (255,255,255), (0, 100*i + 100), (800, 100*i + 100), 2)
+    game.render(screen)
+
+    if game.white_count > game.black_count:
+        game.render_text(screen, 'White Wins!', 1000, 400)
+    elif game.black_count > game.white_count:
+        game.render_text(screen, 'Black Wins!', 1000, 400)
+    else:
+        game.render_text(screen, 'Draw!', 1000, 400)
+
+    pygame.display.update()
+
     while True:
-        if escape_flag:
-            break
         for event in pygame.event.get():
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                escape_flag = True
+            if event.type == pygame.QUIT or event.type == pygame.MOUSEBUTTONDOWN:
+                pygame.quit()
+                exit()
 
 
 if __name__ == '__main__':
