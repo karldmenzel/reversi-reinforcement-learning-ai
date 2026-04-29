@@ -47,3 +47,7 @@ See the training documentation for details:
 - [Pipeline overview](training/PIPELINE_README.md)
 - [Step-by-step training guide](training/TRAINING_README.md)
 - [Data generation details](training/DATA_GENERATION_README.md)
+## Testing List
+- [ ] charles_minimax_copy
+- [ ] minimax_alpha_beta_h_nic_nn
+- 

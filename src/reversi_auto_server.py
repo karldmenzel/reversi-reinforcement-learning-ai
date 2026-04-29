@@ -2,10 +2,10 @@
 from reversi import reversi
 
 # Algorithm 1 -- update the 'from' to choose a different player
-from greedy_player import choose_move as algorithm_1
+from minimax_alpha_beta_h_nic_nn import choose_move as algorithm_1
 
 # Algorithm 2 -- update the 'from' to choose a different player
-from greedy_player import choose_move as algorithm_2
+from minimax_alpha_beta_updated_weights import choose_move as algorithm_2
 
 class AutoGameServer:
     def __init__(self, player1, player2):

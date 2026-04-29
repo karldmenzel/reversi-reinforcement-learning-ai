@@ -16,15 +16,27 @@ from heuristic_functions import heuristic_nic
 from nn_heuristic import NNHeuristic
 from reversi import reversi
 from utils import (
-    WEIGHT_MATRIX,
     ZOBRIST_TURN,
     apply_move_with_hash,
     get_legal_moves,
     zobrist_hash,
 )
 
+WEIGHT_MATRIX = np.array(
+    [
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
+        [-20, -20, 2, 2, 2, 2, -20, -20],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [50, 2, 10, 0, 0, 10, 2, 50],
+        [100, 2, 50, 10, 10, 50, 2, 100],
+        [-20, -20, 2, 2, 2, 2, -20, -20],
+        [1000, -20, 100, 50, 50, 100, -20, 1000],
+    ]
+)
+
 _weights_path = os.path.join(
-    os.path.dirname(__file__), "", "weights", "heuristic_best_v3.npz"
+    os.path.dirname(__file__), "", "weights", "heuristic_best_v4.npz"
 )
 
 try:

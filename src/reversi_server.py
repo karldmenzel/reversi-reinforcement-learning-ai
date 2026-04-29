@@ -91,12 +91,12 @@ def main():
     pygame.display.set_caption('Runner')
     clock = pygame.time.Clock()
 
-    background_surface = pygame.image.load('data/background.jpeg')
+    background_surface = pygame.image.load('src/data/background.jpeg')
     background_surface = pygame.transform.scale(background_surface, (800,800))
 
-    white_piece = pygame.image.load('data/white_piece.png')
+    white_piece = pygame.image.load('src/data/white_piece.png')
     white_piece = pygame.transform.scale(white_piece, (70,70))
-    black_piece = pygame.image.load('data/black_piece.png')
+    black_piece = pygame.image.load('src/data/black_piece.png')
     black_piece = pygame.transform.scale(black_piece, (70,70))
     game = drawable_reversi(white_piece, black_piece)
 
